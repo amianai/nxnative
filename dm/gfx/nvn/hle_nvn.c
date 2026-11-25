@@ -2481,7 +2481,14 @@ static nvn_fstep g_fs;   // present thread only
 static nvn_fgpu g_fg;   // the GPU time at kmin and at the current hold (nvn_fstep_gpu_slowed)
 static _Atomic int g_fs_k;   // the hold presentation follows (0 = not decided yet)
 // The display link runs at 30 Hz at a 30 cap, except while the game fixes its own step at 1 (BotW's VFR override)
-int nvn_fps_high_now(void) { return atomic_load(&g_fs_k) == 1 ? 120 : 60; }   // hle_fpslock.c: the target of the next game frame, from the hold in force
+int nvn_fps_high_now(void) { return atomic_load(&g_fs_k) == 1 ? 120 : 60; }
+// hle_fpslock.c unity_fixed_tick: the frame rate the screen shows at the cap in force, from the cap and not from the hold (late frames step the hold for a moment; the game's
+// fixed step follows what the player's screen and power allow, not each late frame): 120, a 100 Hz screen's 100 (high_cap_tick: a frame each refresh), else 60
+int nvn_fps_rate_now(void) {
+    if (!fps_high() || atomic_load(&g_high_cap) != 120) return 60;
+    int shz = front_screen_max_fps();
+    return mtl_display_hz() != 0 && shz > 60 && shz < 120 ? shz : 120;
+}   // hle_fpslock.c: the target of the next game frame, from the hold in force
 // The rate of vi::GetDisplayVsyncEvent (hle_sdk16.c, nvn_mtl.m mtl_link_wait_vsync): the Switch's 60 Hz, or 120 while 120 fps is on and its hold is one tick of 1/120 s. A game that
 // waits for the next vblank each frame is held to the event's rate whatever the present cap: Unity's NVN device waits until its vblank time (set from the event) passes
 // (The Rogue Prince of Persia: main+0x14f65f0), so at 120 every frame came two ticks late and the hold fell back to 60. The hold's trial at 120 must already have the event at 120

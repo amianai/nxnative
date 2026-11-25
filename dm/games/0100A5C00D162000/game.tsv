@@ -42,3 +42,15 @@ depth_mode	zero
 # ---- Shader split (shader_split.py; Unity Shader objects, read by unityfs.py) ----
 shader_groups	/Data/=data
 shader_note	Cuphead shaders
+
+# ---- Frame rate ----
+# 60 fps on the Switch, up to 120 on the Mac: Unity 2017.4 registers only QualitySettings.get_vSyncCount from code (dm/tools/unity_fps.py finds it; no targetFrameRate setter is
+# registered), the host writes the count from the frame step's hold (hle_fpslock.c) and presents at it; Unity steps Update by the time that really passed. The player's motors
+# (LevelPlayerMotor, PlanePlayerMotor) move in FixedUpdate by CupheadTime.FixedDelta, and weapons fire on WaitForFixedUpdate by it; the step is TimeManager's Fixed Timestep
+# (globalgamemanagers: 1/60 s). At 120 fps with that step the player moved every other frame: the host keeps it at one FixedUpdate a frame (unity_fixed_step: 1/120 s at 120
+# fps, 1/100 on a 100 Hz screen, the game's 1/60 at 60). Measured windowless on the Forest Follies start (route of DM_KEYS, 2026-11-24): a 1.6 s run covered 146 px at 60 fps
+# with the game's step, 146 at 60 with 1/120, 149 at 120 with 1/120; the jump rose 74.5 px, 78.8 and 74.1. Seven places count frames (FrameDelayedCallback: the title, menus,
+# the "Run 'n Gun!" card) and end sooner at 120.
+fps_target	120
+fps_max	120
+unity_fixed_step	on

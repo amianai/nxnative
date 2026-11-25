@@ -75,6 +75,9 @@ typedef struct {
     uint64_t unity_target_fps; // Unity's Application.targetFrameRate, an int32 at main + this (patch_nso.py, unity_fps.py; hle_fpslock.c); 0 = none
     uint64_t unity_qs_ptr;     // Unity's QualitySettings (main's offset of the global pointer); the current level's vSyncCount, an int32, is at
     uint32_t unity_qs_idx, unity_qs_arr, unity_qs_size, unity_qs_vsync;   // [obj + arr] + (int32)[obj + idx] * size + vsync; 0 = none
+    uint64_t unity_tm_ptr;     // Unity's TimeManager (main's offset of the global pointer, unity_fps.py fixed_step); its fixed step, the step's smoothed copy, its inverse and the
+    uint32_t unity_tm_fixed, unity_tm_smooth, unity_tm_inv, unity_tm_max;   // maximum step at [ptr] + these, as TimeManager::SetFixedDeltaTime writes them; 0 = none
+    uint32_t unity_tm_time, unity_tm_dyn;   // its fixed and dynamic times (doubles, TimeManager::StepFixedTime compares them); 0 = not found
     uint64_t fps_state_off;    // frame step state page (patch_nso.py FRAME_STEP: Tears of the Kingdom 1.4.3 and Breath of the Wild 1.9.0 main); 0 = none
     uint32_t step_max;         // the largest step the frame step stubs give the game (the fixups table's STEP_MAX, patch_nso.py ctx.step_max); 0 = FSTEP_MAX
     uint32_t render_scale_max; // a render-scale stub's largest scale (the fixups table's RENDER_SCALE, patch_nso.py): DM_RENDER_SCALE is held to it; 0 = no such stub

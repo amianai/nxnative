@@ -1,5 +1,5 @@
-# kind: evidence  Cuphead shaders (provisional profile) (Unity Shader / GLSLC in RomFS + main) → control section + code area keys (dm/gfx/tools/shader_split.py)
-# column 5 records where each key first appears; this game has no PC version to pair with
+# kind: evidence  Cuphead shaders (Unity Shader / GLSLC in RomFS + main) → control section + code area keys (dm/gfx/tools/shader_split.py)
+# column 5 records where each key first appears, a copy in the game before one in an add-on; no PC shader pairing supplied
 package	index	stage	dm_ctl_sha16	source
 vs_data.bin	0	vertex	b9b7f5224d3200d1	/Data/Resources/unity default resources#GUI/Text Shader#var19.0
 vs_data.bin	1	vertex	8ccc02ec07d33505	/Data/Resources/unity default resources#GUI/Text Shader#var19.1
@@ -23,6 +23,18 @@ vs_data.bin	9	vertex	551508d70ba926b2	/Data/Resources/unity default resources#Hi
 vs_data.bin	10	vertex	4c41a783758273ff	/Data/Resources/unity default resources#Hidden/InternalErrorShader#var19.1
 ps_data.bin	9	pixel	534b5bc507cc2eb6	/Data/Resources/unity default resources#Hidden/InternalErrorShader#var19.4
 ps_data.bin	10	pixel	9666ef16a86ffcad	/Data/Resources/unity default resources#Hidden/InternalErrorShader#var19.5
+cs_data.bin	0	compute	1a4b9948edd5ee63	/Data/Resources/unity default resources#internalskinning#main.0
+cs_data.bin	1	compute	3c055444d8818f8f	/Data/Resources/unity default resources#internalskinning#main.0
+cs_data.bin	2	compute	5aaad1bbee773c73	/Data/Resources/unity default resources#internalskinning#main.0
+cs_data.bin	3	compute	5d70265f329ad408	/Data/Resources/unity default resources#internalskinning#main.0
+cs_data.bin	4	compute	5fa229b44f21442d	/Data/Resources/unity default resources#internalskinning#main.0
+cs_data.bin	5	compute	608362af67fd8c8b	/Data/Resources/unity default resources#internalskinning#main.0
+cs_data.bin	6	compute	65dc9a1fab94be7b	/Data/Resources/unity default resources#internalskinning#main.0
+cs_data.bin	7	compute	a9ccba00b8aff002	/Data/Resources/unity default resources#internalskinning#main.0
+cs_data.bin	8	compute	bd051aa92435fec6	/Data/Resources/unity default resources#internalskinning#main.0
+cs_data.bin	9	compute	ca822f8177d46a93	/Data/Resources/unity default resources#internalskinning#main.0
+cs_data.bin	10	compute	cb476f1b7ed9571d	/Data/Resources/unity default resources#internalskinning#main.0
+cs_data.bin	11	compute	df993b4f958f0195	/Data/Resources/unity default resources#internalskinning#main.0
 vs_data.bin	11	vertex	1e8ed9f5038cd215	/Data/Resources/unity_builtin_extra#Hidden/BlitCopy#var19.0
 ps_data.bin	11	pixel	897d495083b16d7d	/Data/Resources/unity_builtin_extra#Hidden/BlitCopy#var19.1
 vs_data.bin	12	vertex	548e4432e39552ce	/Data/Resources/unity_builtin_extra#Hidden/BlitCopyDepth#var19.0
@@ -197,6 +209,7 @@ vs_data.bin	97	vertex	8d06257195b04c7a	/Data/globalgamemanagers.assets#Sprites/D
 vs_data.bin	98	vertex	521db015c662f8a2	/Data/globalgamemanagers.assets#Sprites/Default#var19.1
 ps_data.bin	95	pixel	ae73c1bfb1ed6a60	/Data/globalgamemanagers.assets#Sprites/Default#var19.2
 ps_data.bin	96	pixel	9b93a133ea034872	/Data/globalgamemanagers.assets#Sprites/Default#var19.3
+cs_data.bin	12	compute	5e5e861a1184511e	/Data/resources.assets#EyeHistogram#KEyeHistogram.0
 vs_data.bin	99	vertex	69cb0f7766061b6c	/Data/resources.assets#Hidden/BlurGamma#var19.0
 ps_data.bin	97	pixel	3dfe250394101c17	/Data/resources.assets#Hidden/BlurGamma#var19.1
 vs_data.bin	100	vertex	94f6fa4066c43e8f	/Data/resources.assets#Hidden/BlurGamma#var19.2

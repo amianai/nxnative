@@ -13,6 +13,7 @@
 // the time that passed is left as it is
 #include "hle.h"
 #include <mach/mach.h>
+#include <math.h>
 
 // What a field holds: the frame rate as a float, double or int32, vsyncs per frame (60 / frame rate) as an int32, or the frame time in milliseconds as a float. Copies: consecutive copies of the
 // value (Unreal keeps one for the game thread, one for the render thread). A row with no pointer (ptr_off 0) has its field at main + field: a constant in main's read-only data, which the loader
@@ -229,6 +230,67 @@ static void unity_vsync_tick(int target, const char *src) {
     uint32_t *p = (uint32_t *)(uintptr_t)a; dm_guest_write_prepare(p, sizeof *p); __atomic_store_n(p, want, __ATOMIC_RELAXED);
     if (nlog < 8) { nlog++; LOG("main: Unity QualitySettings.vSyncCount (level %d) %u → %u vsyncs (%d fps; %s)", lvl, cur, want, target, src); }
 }
+// Unity's fixed step (profile unity_fixed_step; main's fixups UNITY_TM_*, unity_fps.py fixed_step), kept at one FixedUpdate a frame. Unity runs FixedUpdate as many times a frame as
+// whole fixed steps fit in the time that passed: at 120 fps with the game's 1/60 s step the player's motor (Cuphead's LevelPlayerMotor, which moves in FixedUpdate by
+// CupheadTime.FixedDelta) moved every other frame, and at 100 fps with a step of 1/120 s five frames took six steps, one frame in five moving twice as far. The host scales the
+// step the game sets for 60 fps by 60 / the rate the screen shows (nvn_fps_rate_now: 120, a 100 Hz screen's 100, 60 on battery or under the thermal cap), as
+// TimeManager::SetFixedDeltaTime writes it: the step and its smoothed copy, 1 / step, the maximum step raised to the step. A step the game sets itself (a value the host did not
+// write) is the new 60 fps step. Cuphead at 120 fps on the Mac and 60 with the step at 1/120: the same run and jump as 60 fps with the game's step (README)
+// The step's phase: StepFixedTime runs a step while the fixed time plus a step is not past the dynamic time, so after a frame's steps the dynamic time is ahead by a phase between
+// 0 and one step, and a frame one step long takes one step. A frame's measured length varies (100 Hz on the MSI MPG341CQR: 9.66 to 10.31 ms, 1st to 99th percentile), and with the
+// phase near 0 or a whole step those small variations take 0 or 2 steps in a frame: on that run's frame times a phase near the edge gave 71 such frames in 23 s, the middle none.
+// The phase drifts by the difference between the screen's real rate and the step, so the host keeps it in the middle half of the step: outside it the fixed time moves 0.1 ms a
+// frame toward the middle (DM_UNITY_PHASE=0: left alone). The fixed time stays within a step of the game's own; a write that meets the game's own update of it is lost and made
+// again at the next frame
+static struct { uint8_t *base; uint64_t ptr; uint32_t fixed, smooth, inv, max, time, dyn; } tm;
+static void unity_phase_tick(uint64_t obj, float step) {
+    static int on = -1; static unsigned frames, moved, nlog, took[3], odd, nodd; static double lo = 1, hi = 0, prev = -1, wrote_adj; static uint64_t prev_ns;
+    if (on < 0) { const char *e = getenv("DM_UNITY_PHASE"); on = !e || atoi(e) != 0; if (!on) LOG("main: Unity fixed-step phase left alone (DM_UNITY_PHASE=0)"); }
+    if (!tm.time || !tm.dyn) return;
+    double ft, dt;
+    if (!rd(obj + tm.time, &ft, sizeof ft) || !rd(obj + tm.dyn, &dt, sizeof dt)) return;
+    // Steps this frame (once a present, after its frame's steps): the fixed time's advance, less the host's own move, in steps: 1 in a smooth frame, 0 or 2 where it hitched
+    // A frame of an ordinary length (0.7 to 1.3 steps of the host's clock since the last present) that took 0 or 2 steps is the stutter the phase is kept for; a long frame's
+    // 2 steps (a hitch) keep the game's speed
+    uint64_t now = now_ns(); double wall = prev_ns ? (now - prev_ns) / 1e9 / step : 0;
+    if (prev >= 0) { double n = (ft - prev - wrote_adj) / step; int k = n < 0.5 ? 0 : n < 1.5 ? 1 : 2; if (n > -0.5 && n < 4.5) took[k]++;
+                     if (k != 1 && wall > 0.7 && wall < 1.3) { odd++; if (nodd < 12 && getenv("DM_UNITY_STEP_LOG")) { nodd++; LOG("main: Unity frame of %.2f steps took %d (phase %.2f)", wall, k, fmod(dt - ft, step) / step); } } }
+    prev = ft; wrote_adj = 0; prev_ns = now;
+    if (!on) goto stats;
+    double gap = dt - ft, s = step;
+    if (!(gap >= 0 && gap < 4 * s)) return;   // a reset, or the game far behind (its maximum step): Unity's own catch-up
+    double ph = fmod(gap, s) / s;   // the phase after this frame's steps, as a fraction of a step (read before or after them)
+    if (ph < lo) lo = ph; if (ph > hi) hi = ph;
+    if (ph >= 0.25 && ph <= 0.75) goto stats;
+    double adj = (ph < 0.5 ? -1 : 1) * 0.0001;   // phase too small: the fixed time back (the dynamic time further ahead); too large: forward
+    uint64_t bits; double nt = ft + adj; memcpy(&bits, &nt, sizeof bits);
+    dm_guest_write_prepare((void *)(uintptr_t)(obj + tm.time), 8); __atomic_store_n((uint64_t *)(uintptr_t)(obj + tm.time), bits, __ATOMIC_RELAXED);
+    moved++; wrote_adj = adj;
+    if (nlog < 4) { nlog++; LOG("main: Unity fixed-step phase %.2f of a step: fixed time %+.1f ms toward the middle", ph, adj * 1e3); }
+stats:
+    if (++frames % 1200 == 0) { LOG("main: Unity fixed steps over %u frames: %u frames took 0, %u one, %u two or more (%u of them in frames of an ordinary length); phase %.2f to %.2f of a step, moved in %u", 1200u, took[0], took[1], took[2], odd, lo, hi, moved);
+                                lo = 1; hi = 0; moved = 0; took[0] = took[1] = took[2] = 0; odd = 0; }
+}
+int nvn_fps_rate_now(void);   // hle_nvn.c
+__attribute__((weak)) int nvn_fps_rate_now(void) { return 60; }
+static void unity_fixed_tick(void) {
+    static float game, wrote; static int rate, nlog;
+    uint64_t obj = 0; float cur;
+    if (!rd((uint64_t)(uintptr_t)(tm.base + tm.ptr), &obj, sizeof obj) || !obj || !rd(obj + tm.fixed, &cur, sizeof cur)) return;   // not made yet
+    if (!(cur > 0.0001f && cur < 1.0f)) return;
+    unity_phase_tick(obj, cur);
+    if (cur != wrote) { game = cur; rate = 0; }   // the game's own step (its first, or one it set since)
+    int r = nvn_fps_rate_now();
+    if (r == rate) return;
+    float step = game * 60.0f / (float)r, inv = 1.0f / step, mx;
+    float *p = (float *)(uintptr_t)(obj + tm.fixed), *ps = (float *)(uintptr_t)(obj + tm.smooth), *pi = (float *)(uintptr_t)(obj + tm.inv), *pm = (float *)(uintptr_t)(obj + tm.max);
+    dm_guest_write_prepare(p, sizeof *p); dm_guest_write_prepare(ps, sizeof *ps); dm_guest_write_prepare(pi, sizeof *pi); dm_guest_write_prepare(pm, sizeof *pm);
+    __atomic_store_n((uint32_t *)p, *(uint32_t *)&step, __ATOMIC_RELAXED); __atomic_store_n((uint32_t *)ps, *(uint32_t *)&step, __ATOMIC_RELAXED);
+    __atomic_store_n((uint32_t *)pi, *(uint32_t *)&inv, __ATOMIC_RELAXED);
+    if (rd(obj + tm.max, &mx, sizeof mx) && mx < step) __atomic_store_n((uint32_t *)pm, *(uint32_t *)&step, __ATOMIC_RELAXED);
+    if (nlog < 16) { nlog++; LOG("main: Unity fixed step %.6f → %.6f s (1/%.1f: %d fps; the game's step at 60 fps %.6f)", cur, step, 1.0 / step, r, game); }
+    wrote = step; rate = r;
+}
 // The running main's engine limiters, found once: by the first present (dm_fps_lock_tick) or by the graphics layer's present cap, which may ask first (dm_fps_lock_engine, from the acquire)
 static lock_t ue[4], target_lock, monolith_lock, unity_tfr; static const lock_t *rows[MAX_LOCKS]; static int nrow, nier, ue_missing; static uint8_t *base; static uint32_t display;
 static pthread_once_t g_found = PTHREAD_ONCE_INIT;
@@ -253,6 +315,10 @@ static void lock_find(void) {
             uq.base = g_mod[i].base; uq.ptr = g_mod[i].unity_qs_ptr; uq.idx = g_mod[i].unity_qs_idx; uq.arr = g_mod[i].unity_qs_arr; uq.size = g_mod[i].unity_qs_size; uq.vsync = g_mod[i].unity_qs_vsync;
             LOG("main: Unity QualitySettings at [main+%#llx], vSyncCount at [+%#x] + [+%#x] * %#x + %#x", (unsigned long long)uq.ptr, uq.arr, uq.idx, uq.size, uq.vsync);
         }
+        if (DM_GAME_UNITY_FIXED_STEP && g_mod[i].unity_tm_ptr && g_mod[i].unity_tm_fixed && g_mod[i].unity_tm_inv) {
+            tm.base = g_mod[i].base; tm.ptr = g_mod[i].unity_tm_ptr; tm.fixed = g_mod[i].unity_tm_fixed; tm.smooth = g_mod[i].unity_tm_smooth; tm.inv = g_mod[i].unity_tm_inv; tm.max = g_mod[i].unity_tm_max; tm.time = g_mod[i].unity_tm_time; tm.dyn = g_mod[i].unity_tm_dyn;
+            LOG("main: Unity TimeManager at [main+%#llx], fixed step at +%#x (smoothed +%#x, inverse +%#x, maximum +%#x; fixed time +%#x, dynamic +%#x): one FixedUpdate a frame (profile unity_fixed_step)", (unsigned long long)tm.ptr, tm.fixed, tm.smooth, tm.inv, tm.max, tm.time, tm.dyn);
+        } else if (DM_GAME_UNITY_FIXED_STEP) LOG("[RED] main: profile unity_fixed_step on, but the rewriter found no Unity fixed step (main's fixups UNITY_TM_*): FixedUpdate keeps the game's step");
     }
     fb_find();
 }
@@ -263,7 +329,8 @@ static void lock_find(void) {
 int dm_fps_lock_engine(void) { pthread_once(&g_found, lock_find); return nrow || nier || fb.n || uq.base; }
 // Whether the game measures each frame's real length and steps by it (a TICKS120_I32 row: Kirby's pacer counts its 1/120 s ticks crossed since the last frame, its own wait
 // cut), so a frame held longer than its target keeps the game's speed: a screen between 60 and 120 Hz may show 120 fps as one frame a refresh (hle_nvn.c high_cap_tick)
-int dm_fps_lock_measured(void) { pthread_once(&g_found, lock_find); for (int r = 0; r < nrow; r++) if (rows[r]->kind == TICKS120_I32) return 1; return 0; }
+// Unity steps Update by each frame's measured time; where the host keeps the fixed step at one FixedUpdate a frame (unity_fixed_tick) FixedUpdate follows the same rate
+int dm_fps_lock_measured(void) { pthread_once(&g_found, lock_find); for (int r = 0; r < nrow; r++) if (rows[r]->kind == TICKS120_I32) return 1; return tm.base != NULL; }
 int nvn_fps_high_now(void);   // hle_nvn.c
 void dm_fps_lock_tick(void) {
     dynamic_resolution_tick();   // separate from the FPS cap
@@ -307,6 +374,7 @@ void dm_fps_lock_tick(void) {
     }
     if (fb.n) fb_tick(target, src);
     if (uq.base) unity_vsync_tick(target, src);
+    if (tm.base && high) unity_fixed_tick();
     for (int r = 0; r < nrow; r++) {
         const lock_t *L = rows[r]; uint64_t obj = (uint64_t)(uintptr_t)base;
         if (L->ptr_off && (!rd((uint64_t)(uintptr_t)(base + L->ptr_off), &obj, sizeof obj) || !obj)) continue;   // not created yet

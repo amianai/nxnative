@@ -330,6 +330,13 @@ static void read_layout(module_t *m, const char *dir) {
         else if (!strcmp(key, "UNITY_QS_ARR")) m->unity_qs_arr = (uint32_t)v;
         else if (!strcmp(key, "UNITY_QS_SIZE")) m->unity_qs_size = (uint32_t)v;
         else if (!strcmp(key, "UNITY_QS_VSYNC")) m->unity_qs_vsync = (uint32_t)v;
+        else if (!strcmp(key, "UNITY_TM_PTR")) m->unity_tm_ptr = v;
+        else if (!strcmp(key, "UNITY_TM_FIXED")) m->unity_tm_fixed = (uint32_t)v;
+        else if (!strcmp(key, "UNITY_TM_SMOOTH")) m->unity_tm_smooth = (uint32_t)v;
+        else if (!strcmp(key, "UNITY_TM_INV")) m->unity_tm_inv = (uint32_t)v;
+        else if (!strcmp(key, "UNITY_TM_MAX")) m->unity_tm_max = (uint32_t)v;
+        else if (!strcmp(key, "UNITY_TM_TIME")) m->unity_tm_time = (uint32_t)v;
+        else if (!strcmp(key, "UNITY_TM_DYN")) m->unity_tm_dyn = (uint32_t)v;
         else if (!strncmp(key, "UE_CVAR:", 8)) {
             if (m->n_ue_cvar == (int)(sizeof m->ue_cvar / sizeof *m->ue_cvar) || strlen(key + 8) >= sizeof m->ue_cvar[0].name) die("%s: too many Unreal console variables, or too long a name: %s", path, key);
             strcpy(m->ue_cvar[m->n_ue_cvar].name, key + 8); m->ue_cvar[m->n_ue_cvar++].off = v;

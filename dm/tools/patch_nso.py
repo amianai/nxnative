@@ -219,7 +219,8 @@ if UE_FIXED_PTR is not None: print(f'{NAME}: {ue_fixed_why} (ue_fixed_rate.py)')
 elif ue_fixed_why.startswith('[RED] '): print(f'[RED] {NAME}: {ue_fixed_why[6:]}: the host cannot write it')
 
 # ---- Unity's frame rate (main: dm/tools/unity_fps.py finds Application.targetFrameRate and QualitySettings' vSyncCount through the engine's internal-call table, without a build ID) ----
-# The fixups table names their places (UNITY_TARGET_FPS; UNITY_QS_PTR, _IDX, _ARR, _SIZE, _VSYNC); the host writes the profile's fps_target there (hle_fpslock.c)
+# The fixups table names their places (UNITY_TARGET_FPS; UNITY_QS_PTR, _IDX, _ARR, _SIZE, _VSYNC); the host writes the profile's fps_target there (hle_fpslock.c). Where the profile asks
+# (unity_fixed_step), also the TimeManager's fixed step (UNITY_TM_PTR, _FIXED, _SMOOTH, _INV, _MAX), which the host keeps at one FixedUpdate a frame
 import unity_fps
 UNITY_FPS, unity_why = unity_fps.find(bytes(IMG), TEXT_END, RO_OFF, DATA_OFF) if NAME == 'main' else ({}, '')
 if UNITY_FPS: print(f'{NAME}: {unity_why} (unity_fps.py)')
@@ -1907,6 +1908,7 @@ with open(P('fixups.tsv'), 'w') as f:
     if UE_FIXED_PTR is not None: f.write(f'# UE_FIXED_RATE_PTR\t{UE_FIXED_PTR:#x}\n# UE_FIXED_RATE_FIELD\t{UE_FIXED_FIELD:#x}\n# UE_FIXED_RATE_FLAG\t{UE_FIXED_FLAG:#x}\n')   # Unreal's GEngine, UEngine::FixedFrameRate and bUseFixedFrameRate (ue_fixed_rate.py)
     if 'target' in UNITY_FPS: f.write(f"# UNITY_TARGET_FPS\t{UNITY_FPS['target']:#x}\n")   # Unity's Application.targetFrameRate (unity_fps.py)
     if 'qs' in UNITY_FPS: f.write(''.join(f'# UNITY_QS_{k}\t{v:#x}\n' for k, v in zip(('PTR', 'IDX', 'ARR', 'SIZE', 'VSYNC'), UNITY_FPS['qs'])))   # its QualitySettings' vSyncCount (unity_fps.py)
+    if 'tm' in UNITY_FPS: f.write(''.join(f'# UNITY_TM_{k}\t{v:#x}\n' for k, v in zip(('PTR', 'FIXED', 'SMOOTH', 'INV', 'MAX', 'TIME', 'DYN'), UNITY_FPS['tm'])))   # its TimeManager's fixed step (unity_fps.py)
     if movie_native_color_keys(): f.write('# MOVIE_NATIVE_COLOR_KEYS\t0x1\n')
     for n, o in UE_CVARS.items(): f.write(f'# UE_CVAR:{n}\t{o:#x}\n')   # Unreal console variables (ue_cvar.py): the TAutoConsoleVariable registered under each name
     if RENDER_SCALE:   # a render-scale stub reads state +0x10, up to this scale (the loader holds DM_RENDER_SCALE to it; dm/games/settings.py offers the setting up to it)

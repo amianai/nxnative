@@ -22,6 +22,19 @@ Update 1.3.7 (v655360) over the base game; its DLC (The Delicious Last Course) i
 - **Resolved: sprites broke into dark slivers or went missing in about half the runs** (a log in Forest Follies splintered for a whole attempt), **and on the iPhone the picture flickered every fourth frame.** The host reported a ZCull storage size of 0. Unity's NVN pool allocator allocates each depth target's ZCull save area from its pool; asked for a zero-size block, it gave out the offset of a live block, lost that block from its map of allocations, and later freed it with a garbage size. Buffers allocated afterwards overlapped live ones, so copies read staging bytes another copy had overwritten (every fourth frame is the upload ring's period); whether a run broke depended on the allocation order. The size is now never 0 (`zcull_size`).
 - **How it was traced:** the pass dump (`DM_NVN_PASSDUMP_ALL=1`, the `Y copy_b2b` / `Y update_ub` lines) listed in command order every copy and inline update of the frame. A copy whose source an earlier GPU write of the same frame covers reads that write, not the bytes the CPU staged: the broken runs had dozens of those a frame, the clean runs none. The game's allocations overlapped, so the allocator was tracked from observation gates (`OBS` in its `patches.py`) on its free-list push and after its map insert, checking at every event that each block allocated so far was still in the game's map.
 
+## Frame rate
+
+- **120 fps on the Mac** (`fps_target 120`, `fps_max 120`), the screen's rate on a screen between 60 and 120 Hz (100 on a 100 Hz monitor), 60 on battery. Unity 2017.4 registers only `QualitySettings.get_vSyncCount` from code (no `targetFrameRate` setter); `unity_fps.py` finds it and the host writes the count from the 120 fps hold (`hle_fpslock.c`). The hand-drawn animations keep their own timing.
+- **One FixedUpdate a frame** (`unity_fixed_step on`). The player's motors move in `FixedUpdate` by `CupheadTime.FixedDelta`, and weapons fire on `WaitForFixedUpdate`; with the game's 1/60 s step at 120 fps the player moved every other frame. `unity_fps.py` finds the `TimeManager` (`UNITY_TM_*` in the fixups: `[main+0x3ad8048]`, fixed step `+0x48`, smoothed `+0x50`, inverse `+0x58`, maximum `+0xf8`, fixed time `+0x30`, dynamic time `+0x60`), and the host sets the step to 1 / the shown rate (1/120, 1/100, the game's 1/60 at 60), live as the window changes screen.
+- **The step's phase is kept in the middle** (`DM_UNITY_PHASE`, default on): `StepFixedTime` (`main+0x16ffe80`) steps while fixed + step ≤ dynamic time, so with the phase at an edge a frame of an ordinary length ran 0 or 2 steps (108 such frames in 12 s on the 100 Hz monitor). The host nudges the fixed time 0.1 ms toward the middle when the phase leaves 0.25–0.75 of a step: 0 such frames in steady play on the map and in levels. `DM_UNITY_STEP_LOG=1` logs them.
+- **Measured** windowless on the Forest Follies start (2026-11-24): a 1.6 s run covered 146 px at 60 fps and 149 at 120; the jump rose 74.5 px and 74.1. Seven places count frames (`FrameDelayedCallback`: the title, menus, the "Run 'n Gun!" card) and end sooner at 120.
+- **Open:** a 144 Hz screen holds 120 (the cap stops at 120).
+
+## Controllers
+
+- The player's buttons on the Mac come from `env.txt`: `DM_PAD_MAP` for a pad read through GameController (a DualShock 4: `Y=ZR,X=ZL,ZL=Y,ZR=X` shoots with R2 and dashes with L2) and `DM_HID_MAP` for a raw HID clone pad. The game's own remap is in the save (`controller_mapping.sav`).
+- `DM_SCREEN=MSI` opens the window on that monitor.
+
 ## Files and shaders
 
 - 3,118 shaders (1,558 pixel, 1,560 vertex) from the player's serialized files and the AssetBundles of `StreamingAssets`, plus 4 GLSLC outputs in `main`. Every binding decodes.

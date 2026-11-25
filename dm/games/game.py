@@ -167,6 +167,8 @@ def header_one(g):
     if fm not in ('60', '120'): sys.exit(f'{g.id}: fps_max must be 60 or 120: {fm}')
     ft = g.get('fps_target', '0')   # frame rate cap of the rewriter's frame step (FRAME_STEP in the profile's patches.py: Tears of the Kingdom 1.4.3, Breath of the Wild 1.9.0) or of the engine's own frame limit (hle_fpslock.c): 0 = the game's own step, 30 / 60, or 120 with fps_max 120 (60 where the screen or the power does not allow it)
     if ft not in ('0', '30', '60') + (('120',) if fm == '120' else ()): sys.exit(f'{g.id}: fps_target must be 0, 30 or 60' + (' or 120' if fm == '120' else ' (120 needs fps_max 120)') + f': {ft}')
+    ufs = g.get('unity_fixed_step', 'off')   # Unity's fixed step kept at one FixedUpdate a frame (hle_fpslock.c unity_fixed_tick): the game's own 60 fps step times 60 / the frame rate
+    if ufs not in ('on', 'off'): sys.exit(f'{g.id}: unity_fixed_step must be on or off: {ufs}')   # the host shows (120, a 100 Hz screen's 100, 60); on only where FixedUpdate steps by the step
     fh = g.get('fps_hold', 'on')   # whether the frame step may hold a frame longer than the cap's vsyncs when frames come late (hle_nvn.c fstep_tick): on / off
     if fh not in ('on', 'off'): sys.exit(f'{g.id}: fps_hold must be on or off: {fh}')
     utp = g.get('ue_texture_pool', '0')   # Unreal's r.Streaming.PoolSize in MB, raised to this on the Mac (hle_uecvar.c; DM_UE_TEXTURE_POOL overrides, and turns it on for iOS): 0 = the game's own pool
@@ -248,6 +250,7 @@ def header_one(g):
          f'#define DM_GAME_FPS_TARGET {int(ft)}',
          f'#define DM_GAME_FPS_MAX {int(fm)}',
          f'#define DM_GAME_FPS_HOLD {int(fh == "on")}',
+         f'#define DM_GAME_UNITY_FIXED_STEP {int(ufs == "on")}',
          f'#define DM_GAME_UE_TEXTURE_POOL {int(utp)}',
          f'#define DM_GAME_UE_FPS_CVAR {q(ufc)}',
          f'#define DM_GAME_PRESENT_SNAP {int(ps == "on")}',
