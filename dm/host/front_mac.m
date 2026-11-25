@@ -153,10 +153,10 @@ static void push(void) {
 }
 static int key_bit(unsigned short code) {
     switch (code) {
-        case 38: return 0;  case 40: return 1;  case 32: return 2;  case 34: return 3;    // J K U I → A B X Y
-        case 3: return 4;   case 5: return 5;                                            // F G → press stick
-        case 12: return 6;  case 14: return 7;  case 6: return 8;   case 8: return 9;    // Q E Z C → L R ZL ZR
-        case 36: return 10; case 48: return 11;                                          // Return Tab → + −
+        // Cuphead: J A (EX, confirm), K and Space B (jump, back), L Y (shoot), I X (dash), left Shift L (lock, on_flags), Q R (swap weapon)
+        case 38: return 0;  case 40: return 1;  case 49: return 1;  case 37: return 3;  case 34: return 2;   // J K Space L I → A B B Y X
+        case 12: return 7;                                                               // Q → R
+        case 36: return 10; case 53: return 10;                                          // Return Escape → + (− has no key)
         case 123: return 12; case 126: return 13; case 124: return 14; case 125: return 15; // ← ↑ → ↓
     }
     return -1;
@@ -179,11 +179,19 @@ static void on_key(NSEvent *e, int down) {
     // An arrow key pressed with Shift held is the right stick until it is released; without Shift, the D-pad. The keyboard had no right stick: a 3D game's camera
     // could be turned only with a controller (Donkey Kong Bananza)
     int *rs = c == 123 ? &g_rl : c == 126 ? &g_ru : c == 124 ? &g_rr : c == 125 ? &g_rd : NULL;
-    if (rs && (down ? (e.modifierFlags & NSEventModifierFlagShift) != 0 : *rs)) { *rs = down; push(); return; }
+    if (rs && (down ? (e.modifierFlags & 0x4) != 0 : *rs)) { *rs = down; push(); return; }   // the right Shift only: the left one is L (on_flags)
     int b = key_bit(c);
-    uint64_t m = b >= 0 ? 1ull << b : c == 49 ? DM_BTN_SHAKE : 0;   // Space: shaken while held
+    uint64_t m = b >= 0 ? 1ull << b : 0;   // Space is B, so the keyboard no longer shakes
     g_btn = down ? (g_btn | m) : (g_btn & ~m);
     if (down && (m || c == 13 || c == 0 || c == 1 || c == 2)) cursor_hide_for_input();   // a key the game takes (WASD: the left stick)
+    push();
+}
+// The left Shift is L (Cuphead's lock), held while its device-dependent bit (0x2) is set
+static void on_flags(NSEvent *e) {
+    if (e.keyCode != 56) return;
+    int down = g_input_on && (e.modifierFlags & 0x2) != 0;
+    g_btn = down ? (g_btn | DM_BTN_L) : (g_btn & ~(uint64_t)DM_BTN_L);
+    if (down) cursor_hide_for_input();
     push();
 }
 
@@ -210,6 +218,28 @@ static const char *pad_name(GCController *c);
 static void pads_motion_changed(GCController *gone);
 // GameController's controllers that the host reads from their HID reports instead, so they stay unread here: identical pads (pad_hid_mac.h) and original Joy-Cons (pad_jc1_mac.h)
 static int pad_gc_unread(GCController *c) { return hidpad_gc_unread(c) || jc1_gc_unread(c); }
+// DM_PAD_MAP=<out>=<in>,…: GameController controllers' buttons moved, each <in> (the button as mapped by position, pad_names order) pressing <out> instead,
+// e.g. Y=ZR,ZR=X: the right trigger is Y and the top face button ZR. A button not named as an <in> keeps its place. Raw HID pads have DM_HID_MAP instead
+static uint64_t pad_remap(uint64_t m) {
+    static int8_t to[16]; static int ready;
+    if (!ready) {
+        ready = 1; for (int b = 0; b < 16; b++) to[b] = (int8_t)b;
+        const char *e = getenv("DM_PAD_MAP");
+        for (const char *s = e; s && *s; s = strchr(s, ',') ? strchr(s, ',') + 1 : "") {
+            const char *eq = strchr(s, '='), *end = strchr(s, ','); if (!eq || (end && eq > end)) continue;
+            size_t ol = (size_t)(eq - s), il = end ? (size_t)(end - eq - 1) : strlen(eq + 1); int o = -1, i = -1;
+            for (int b = 0; b < 16; b++) {
+                if (ol == strlen(pad_hid_names[b]) && !strncasecmp(s, pad_hid_names[b], ol)) o = b;
+                if (il == strlen(pad_hid_names[b]) && !strncasecmp(eq + 1, pad_hid_names[b], il)) i = b;
+            }
+            if (o >= 0 && i >= 0) to[i] = (int8_t)o; else LOG("front end: DM_PAD_MAP entry %.*s is not <button>=<button>; ignored", (int)(end ? end - s : (long)strlen(s)), s);
+        }
+        if (e && *e) LOG("front end: GameController controllers' buttons moved (DM_PAD_MAP=%s)", e);
+    }
+    uint64_t r = m & ~0xffffull;
+    for (int b = 0; b < 16; b++) if (m >> b & 1) r |= 1ull << to[b];
+    return r;
+}
 static void pad_read(GCExtendedGamepad *g) {
     if (!g_input_on) return;
     hq_poll(); if (hq_blocks_input(g_hq.phase)) return;
@@ -224,6 +254,7 @@ static void pad_read(GCExtendedGamepad *g) {
     K(g.buttonMenu, DM_BTN_PLUS); K(g.buttonOptions, DM_BTN_MINUS); K(g.leftThumbstickButton, DM_BTN_LS); K(g.rightThumbstickButton, DM_BTN_RS);   // nil on pads without them: not pressed
     K(g.dpad.left, DM_BTN_LEFT); K(g.dpad.up, DM_BTN_UP); K(g.dpad.right, DM_BTN_RIGHT); K(g.dpad.down, DM_BTN_DOWN);
     #undef K
+    m = pad_remap(m);   // DM_PAD_MAP
     if (p < 0) {   // DM_PAD_PRESS_TO_JOIN=1: it joins at its first button
         GCController *c = g.controller; if (!m || (p = pad_join((__bridge const void *)c, pad_name(c))) < 0) return;
         g_held[p] = c; dm_motion_attach(c, p); pads_motion_changed(nil);
@@ -696,7 +727,7 @@ void front_picture_shape(int w, int h) { if (w > 0 && h > 0) g_picture_aspect = 
 @implementation DmGameView
 - (void)mouseDown:(NSEvent *)e { [self mouseDragged:e]; }
 - (void)mouseDragged:(NSEvent *)e {
-    if (!g_input_on) return;
+    if (!g_input_on || 1) return;   // Cuphead: keyboard only, the mouse touches nothing
     NSPoint p = [self convertPoint:e.locationInWindow fromView:nil]; NSSize b = self.bounds.size;
     double w = b.width, h = b.height;
     if (w <= 0 || h <= 0) return;
@@ -1677,6 +1708,14 @@ void front_run(void (*guest)(void)) {
         if (getenv("DM_SHOW_FPS") && atoi(getenv("DM_SHOW_FPS"))) front_mac_fps(g_layer);
         power_watch();   // just the frame rate, top right (Apple's HUD shows much more)
         [win center];
+        // DM_SCREEN=<part of a screen's name> (MSI, Color LCD): the window opens centred on that screen instead of the main one; a screen not found is named and the main one kept
+        if (getenv("DM_SCREEN") && *getenv("DM_SCREEN")) {
+            NSString *want = @(getenv("DM_SCREEN")); NSScreen *to = nil;
+            for (NSScreen *s in NSScreen.screens) if ([s.localizedName rangeOfString:want options:NSCaseInsensitiveSearch].location != NSNotFound) { to = s; break; }
+            if (to) { NSRect f = to.visibleFrame, w = win.frame; [win setFrameOrigin:NSMakePoint(NSMidX(f) - w.size.width / 2, NSMidY(f) - w.size.height / 2)];
+                      LOG("front end: window on the screen %s (DM_SCREEN)", to.localizedName.UTF8String); }
+            else LOG("front end: DM_SCREEN=%s matches no screen: the window stays on the main one", getenv("DM_SCREEN"));
+        }
         [win makeKeyAndOrderFront:nil];
         screen_refresh(win.screen ?: NSScreen.mainScreen);
         g_win = win;
@@ -1741,8 +1780,9 @@ void front_run(void (*guest)(void)) {
                 if (conn) hq_log_setting(); }];
         dm_haptics_apple_init();
         pads_start();
-        [NSEvent addLocalMonitorForEventsMatchingMask:NSEventMaskKeyDown | NSEventMaskKeyUp handler:^NSEvent *(NSEvent *e) {
+        [NSEvent addLocalMonitorForEventsMatchingMask:NSEventMaskKeyDown | NSEventMaskKeyUp | NSEventMaskFlagsChanged handler:^NSEvent *(NSEvent *e) {
             if (e.window != win) return e;   // Only swallow keys for the game window; other windows such as the software keyboard input box receive typing as usual
+            if (e.type == NSEventTypeFlagsChanged) { on_flags(e); return e; }   // modifiers go on to AppKit too (isARepeat is not valid on them)
             if (e.type == NSEventTypeKeyDown && (e.modifierFlags & NSEventModifierFlagCommand)) return e;   // ⌘ shortcuts go to the menu; a key released while ⌘ is held still reaches the game, or it would stay pressed
             if (e.type == NSEventTypeKeyDown && fn_shortcut(e)) return e;   // fn (Globe) + a letter is the system's (fn+F full screen, GitHub issue #873), not the game's F
             if (!e.isARepeat) on_key(e, e.type == NSEventTypeKeyDown);
