@@ -2591,7 +2591,12 @@ static int fstep_hold(void) {
 // Cost = max(CPU: the time between the frames' starts without the pacing wait, GPU: the latest finished frame's GPU time), in vsyncs
 static void fstep_tick(const win_t *o, int c) {
     static uint64_t prev, t0, v0, fixed_sum, held[FSTEP_MAX + 1]; static int nlog;
-    const double v = 1e9 / fstep_hz();
+    // At 120 fps on a screen between 60 and 120 Hz (high_cap_tick) a frame held k ticks shows k refreshes, so the frame's time and cost are measured in refreshes, not in
+    // 1/120 s ticks. In ticks a 100 Hz refresh is 1.2 of them: a frame of 9.2–10 ms, which the screen shows on time, counted as late, and the way back from hold 2 needed 30
+    // frames in a row under 0.95 ticks (7.9 ms) where the GPU, clocked down at 50 fps, took 5–8 ms (Cuphead on the MSI at 100 Hz, plugged in: 50 fps for 30 s at a time,
+    // a dozen times in 25 minutes, at a cost of 2–6 ms a frame at 100 fps)
+    int hz = front_screen_max_fps(), by_refresh = fps_high() && hz > 60 && hz < fstep_hz() && mtl_link_active();
+    const double v = 1e9 / (by_refresh ? hz : fstep_hz());
     uint64_t st = g_fs_start ? g_fs_start : now_ns(), pw = g_fs_wait; g_fs_start = g_fs_wait = 0;
     // A drain of standing frames (g_fs_drain) comes out of the frame's time as far as it made the frame longer than its hold (nvn_fstep_drain_cut)
     static uint64_t drain_before;   // a drain in a later acquire of the previous frame: in this frame's time since that start, not in its pacing wait
@@ -2609,9 +2614,7 @@ static void fstep_tick(const win_t *o, int c) {
     uint64_t probes0 = g_fs.probes, failed0 = g_fs.failed;
     // A screen whose rate is not a multiple of 60 (144, 165 Hz) shows the link's 1/60 s ticks on their nearest refreshes (nvn_mtl.m link_range), so a frame on time can show for one
     // refresh more than its hold: a cheap 50 ms frame shows 54.5 ms at 165 Hz, which counted as late kept the hold at 20 fps for good
-    int hz = front_screen_max_fps(); g_fs.shown_slack = hz > fstep_hz() && hz % fstep_hz() && mtl_link_active() ? (double)fstep_hz() / hz : 0;
-    // At 120 fps on a screen between 60 and 120 Hz (high_cap_tick), a frame held k ticks shows k refreshes: k × 120 / hz ticks, 2.4 at hold 2 on 100 Hz
-    if (fps_high() && hz > 60 && hz < fstep_hz() && mtl_link_active()) g_fs.shown_slack = 2 * ((double)fstep_hz() / hz - 1);
+    g_fs.shown_slack = hz > fstep_hz() && hz % fstep_hz() && mtl_link_active() ? (double)fstep_hz() / hz : 0;   // by_refresh: a frame shows its hold exactly
     int cslow = fstep_cpu_slowed(o->presents), gslow = nvn_fstep_gpu_slowed(&g_fg, gpu, &g_fs, kmin) && dm_thermal_now() <= 1 && !dm_low_power_now();   // same gates as the CPU's
     // Present snapshots (nvn_mtl.m snap_take): the game runs up to a frame ahead of the screen, so a frame whose work runs long is absorbed instead of shown late, and its cost is
     // no evidence against the hold (Breath of the Wild in Zora's Domain stepped to 30 at a GPU time of 0.75 vsyncs: the frame's CPU time held its waits on its own GPU work).
@@ -2647,7 +2650,7 @@ static void fstep_tick(const win_t *o, int c) {
         else if (gslow) w += snprintf(why + w, sizeof why - w, ", GPU %.2f× its time at hold %d", g_fg.cur / g_fg.ref, kmin);
         if (nvn_fstep_same(&g_fs)) snprintf(why + w, sizeof why - w, ", cost %.2f× the cost that held hold %d", g_fs.ccur / g_fs.cref, kmin);
         if (g_fs.k > k0 && g_fs.cref > 0) snprintf(held, sizeof held, "; hold %d held at %.2f", kmin, g_fs.cref);   // what a probe compares the longer hold's cost with
-        LOG("[nvn] frame step: hold %d → %d %s at present %llu (%s; cost %.2f, GPU %.2f%s)%s", k0, g_fs.k, fps_high() ? "ticks of 1/120 s" : "vsyncs", (unsigned long long)o->presents,
+        LOG("[nvn] frame step: hold %d → %d %s at present %llu (%s; cost %.2f, GPU %.2f%s)%s", k0, g_fs.k, by_refresh ? "refreshes" : fps_high() ? "ticks of 1/120 s" : "vsyncs", (unsigned long long)o->presents,
             fixed ? "the game's own step" : kmin0 > FSTEP_MAX ? "the game's own step ended" : kmin != kmin0 ? "the cap changed" : g_fs.k > k0 ? "3 late frames" : g_fs.probes != probes0 ? why : "trial", cost, gpu, held, ++nlog == 40 ? "; further changes only counted below" : "");
     }
     if (probe0 == 1 && g_fs.probe != 1 && !fixed && nlog < 40) {   // whether the controller raised the clock for the shorter deadline, and the GPU time it measured there
